@@ -1,0 +1,57 @@
+version: "3.9"
+
+# agentns — complete stack
+#
+# Start everything:   docker compose up
+# Without MongoDB:    docker compose up agentns
+# Production:         docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+
+services:
+
+  # ── agentns sidecar ─────────────────────────────────────────────────────────
+  agentns:
+    build: .
+    image: agentns:latest
+    container_name: agentns
+    ports:
+      - "${AGENTNS_PORT:-8200}:8200"
+    environment:
+      AGENTNS_PORT:            "${AGENTNS_PORT:-8200}"
+      AGENTNS_NAMESPACE:       "${AGENTNS_NAMESPACE:-agents.local}"
+      AGENTNS_TLD:             "${AGENTNS_TLD:-agentns.local}"
+      AGENTNS_HEALTH_INTERVAL: "${AGENTNS_HEALTH_INTERVAL:-30}"
+      MONGODB_URI:             "${MONGODB_URI:-}"        # empty = in-memory mode
+      MONGODB_DB:              "${MONGODB_DB:-agentns}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8200/health')"]
+      interval: 30s
+      timeout:  5s
+      retries:  3
+    networks:
+      - agentns-net
+
+  # ── optional: local MongoDB ──────────────────────────────────────────────────
+  # Remove this service if you use MongoDB Atlas or an existing MongoDB instance.
+  mongo:
+    image: mongo:7
+    container_name: agentns-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: agentns
+    restart: unless-stopped
+    profiles:
+      - mongo          # only starts with:  docker compose --profile mongo up
+    networks:
+      - agentns-net
+
+networks:
+  agentns-net:
+    driver: bridge
+
+volumes:
+  mongo-data:

@@ -1,0 +1,64 @@
+[build-system]
+requires      = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name        = "agentns"
+version     = "1.0.0"
+description = "Single-binary service discovery sidecar for multi-agent systems"
+readme      = "README.md"
+license     = { text = "MIT" }
+requires-python = ">=3.10"
+
+keywords = [
+  "agents", "service-discovery", "multi-agent", "AI", "sidecar",
+  "A2A", "LLM", "agent-routing", "nameservice",
+]
+
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries",
+  "Topic :: Internet :: Name Service (DNS)",
+  "Framework :: FastAPI",
+]
+
+dependencies = [
+  "fastapi>=0.110.0",
+  "uvicorn[standard]>=0.29.0",
+  "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+mongo = ["motor>=3.4.0"]
+dev   = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "httpx>=0.27.0",
+  "black",
+  "ruff",
+]
+
+[project.urls]
+Homepage      = "https://github.com/manikandan-dataworks/agentns"
+Documentation = "https://github.com/manikandan-dataworks/agentns#readme"
+"Bug Tracker" = "https://github.com/manikandan-dataworks/agentns/issues"
+
+[project.scripts]
+agentns-server = "agentns.server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agentns*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
