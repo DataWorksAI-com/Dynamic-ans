@@ -242,9 +242,42 @@ async def resolve(body: dict):
 
     if agent_name:
         parsed = parse_urn(agent_name)
-        label  = parsed.label
+
+        # ── Namespace validation ───────────────────────────────────────────────
+        # If the URN contains a TLD or namespace, they must match this instance.
+        # This makes agentns behave like DNS — it only answers for its own domain.
+        #
+        # Examples (DEFAULT_TLD="agents.dataworksai.com", DEFAULT_NS="mbta-transit-ci"):
+        #
+        #   urn:agents.dataworksai.com:mbta-transit-ci:alerts  → OK
+        #   urn:agents.dataworksai.com:alerts                  → OK (namespace omitted)
+        #   urn:wrong.com:mbta-transit-ci:alerts               → 403 wrong TLD
+        #   urn:agents.dataworksai.com:other-app:alerts        → 403 wrong namespace
+        #   alerts                                             → OK (plain label, no check)
+
+        if parsed.tld and parsed.tld != DEFAULT_TLD:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"This agentns instance handles TLD '{DEFAULT_TLD}', "
+                    f"not '{parsed.tld}'. You are asking the wrong nameserver."
+                ),
+            )
+
+        if parsed.namespace and parsed.namespace != DEFAULT_NS:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"This agentns instance handles namespace '{DEFAULT_NS}', "
+                    f"not '{parsed.namespace}'. "
+                    f"Register agents under the correct namespace or update AGENTNS_NAMESPACE."
+                ),
+            )
+
+        label = parsed.label
+
     elif label_direct:
-        label  = label_direct
+        label = label_direct
     else:
         raise HTTPException(status_code=400, detail="Provide 'agent_name' (URN) or 'label'")
 

@@ -96,6 +96,37 @@ async def test_resolve_by_urn(client):
 
 
 @pytest.mark.asyncio
+async def test_resolve_wrong_tld_rejected(client):
+    """URN with a different TLD should be rejected — wrong nameserver."""
+    resp = await client.post("/resolve", json={
+        "agent_name": "urn:wrong.com:agents.local:emailer"
+    })
+    assert resp.status_code == 403
+    assert "wrong nameserver" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_wrong_namespace_rejected(client):
+    """URN with correct TLD but wrong namespace should be rejected."""
+    resp = await client.post("/resolve", json={
+        "agent_name": "urn:agentns.local:other-app:emailer"
+    })
+    assert resp.status_code == 403
+    assert "namespace" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_plain_label_no_check(client):
+    """Plain label (no URN) skips namespace check entirely."""
+    await client.post("/register", json={"label": "emailer", "endpoint": "http://test:9001"})
+    _health_cache["http://test:9001"] = {
+        "status": "healthy", "load": 30.0, "response_time_ms": 50.0, "last_check": "now"
+    }
+    resp = await client.post("/resolve", json={"label": "emailer"})
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_resolve_unknown_label(client):
     resp = await client.post("/resolve", json={"label": "nonexistent"})
     assert resp.status_code == 404
