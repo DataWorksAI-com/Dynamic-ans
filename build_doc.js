@@ -299,7 +299,28 @@ children.push(codeBlock([
 ]));
 children.push(spacer(8));
 
-children.push(h2("2.3  Why Single Binary"));
+children.push(h2("2.3  The Three ANS Roles"));
+children.push(body(
+  "Every Agent Name Service — whether distributed across three servers or collapsed into one process — has three conceptually distinct roles. Understanding them is essential to understanding how agentns works:"
+));
+children.push(spacer(4));
+children.push(makeTable(
+  ["Role", "Responsibility", "agentns code"],
+  [
+    ["Namespace Server", "Target Agent registers its deployment and receives a canonical AI Agent Name (URN). The NS owns and issues URNs — it is the authoritative source of agent identity.", "POST /register → build_urn() → returns agent_name in response"],
+    ["Authoritative Name Server", "Knows the live status of the environment. When asked for an agent, it checks health, load, and location in real time and generates a Tailored End-Point — not a static URL but the best endpoint right now.", "Background _health_loop() + rank_servers() + calculate_ttl()"],
+    ["Recursive Resolver", "Entry point for the Requester Agent. Accepts a URN query, validates it belongs to this nameserver, checks cache, delegates to the Auth NS logic, and returns the Tailored End-Point. The requester never talks to the NS or Auth NS directly.", "POST /resolve → parse_urn() → cache → rank_servers() → response"],
+  ],
+  [2200, 3800, 3360]
+));
+children.push(spacer(6));
+children.push(body(
+  "The namespace validation in POST /resolve enforces the Resolver role correctly: if the URN's TLD does not match this instance's AGENTNS_TLD, agentns returns HTTP 403 — it is literally the wrong nameserver for that URN, exactly as DNS would reject a query for a zone it does not own.",
+  { italic: true }
+));
+children.push(spacer(8));
+
+children.push(h2("2.4  Why Single Binary"));
 children.push(body(
   "Traditional ANS architectures require three separate networked hops, each adding latency and a potential point of failure:"
 ));
@@ -310,7 +331,7 @@ children.push(codeBlock([
 ]));
 children.push(spacer(4));
 children.push(body(
-  "agentns collapses all three into one in-process function call chain, eliminating the network overhead of the middle hops while preserving the same logical resolution model."
+  "agentns collapses all three into one in-process function call chain, eliminating the network overhead of the middle hops while preserving the same logical resolution model. Each role still has a clear boundary: registration (NS), health + ranking (Auth NS), and query entry (Resolver) — they are just function calls rather than network round-trips."
 ));
 children.push(spacer(8), new Paragraph({ children: [new PageBreak()] }));
 
@@ -406,13 +427,44 @@ children.push(codeBlock([
 ]));
 children.push(spacer(6));
 children.push(body(
-  "Key behavior: If the same (label, endpoint) pair is registered again, the existing entry is updated, not duplicated. If a new endpoint is registered under the same label, it is appended — creating a replica group. This is how multi-region failover is achieved without any configuration change.",
+  "Key behavior: If the same (label, endpoint) pair is registered again, the existing entry is updated, not duplicated. If a new endpoint is registered under the same label, it is appended — creating a replica group. This is how multi-region failover is achieved without any configuration change. The agent_name field in the response is the URN issued by the Namespace Server role — the caller can store this as its permanent AI Agent Name.",
   { italic: true }
 ));
 children.push(spacer(8));
 
-// 4.2 Cache Hit
-children.push(h2("4.2  Resolution Flow — Cache Hit"));
+// 4.2 Namespace Validation
+children.push(h2("4.2  Namespace Validation Flow"));
+children.push(body(
+  "When a URN is provided (not a plain label), agentns first validates that the URN belongs to this instance before doing any lookup. This is the Recursive Resolver checking it owns the zone:"
+));
+children.push(spacer(4));
+children.push(codeBlock([
+  "POST /resolve  { 'agent_name': 'urn:wrong.com:sales:emailer' }",
+  "",
+  "Step 1  parse_urn()  →  tld='wrong.com'  namespace='sales'  label='emailer'",
+  "Step 2  TLD check: 'wrong.com' != AGENTNS_TLD ('agentns.local')",
+  "         → HTTP 403  'You are asking the wrong nameserver.'",
+  "",
+  "POST /resolve  { 'agent_name': 'urn:agentns.local:other-app:emailer' }",
+  "",
+  "Step 1  parse_urn()  →  tld='agentns.local'  namespace='other-app'  label='emailer'",
+  "Step 2  TLD check:       PASS (matches AGENTNS_TLD)",
+  "Step 3  Namespace check: 'other-app' != AGENTNS_NAMESPACE ('agents.local')",
+  "         → HTTP 403  'This instance handles namespace agents.local, not other-app.'",
+  "",
+  "POST /resolve  { 'label': 'emailer' }",
+  "",
+  "  Plain label — no URN → namespace check skipped entirely → proceeds to lookup",
+]));
+children.push(spacer(6));
+children.push(body(
+  "Plain labels (no urn: prefix) skip namespace validation entirely. This allows simple label-based resolution without requiring a full URN, which is useful during development or in single-namespace deployments.",
+  { italic: true }
+));
+children.push(spacer(8));
+
+// 4.3 Cache Hit
+children.push(h2("4.3  Resolution Flow — Cache Hit"));
 children.push(body(
   "The fast path. A repeated resolution within the TTL window returns a cached result in under 1 ms:"
 ));
@@ -433,8 +485,8 @@ children.push(codeBlock([
 ]));
 children.push(spacer(8));
 
-// 4.3 Cache Miss
-children.push(h2("4.3  Resolution Flow — Cache Miss"));
+// 4.4 Cache Miss
+children.push(h2("4.4  Resolution Flow — Cache Miss"));
 children.push(body(
   "Full resolution path — executed on first call or after TTL expiry. Example: two replicas registered (New York, London), requester in Paris:"
 ));
@@ -467,8 +519,8 @@ children.push(codeBlock([
 ]));
 children.push(spacer(8));
 
-// 4.4 Health Sweep
-children.push(h2("4.4  Background Health Sweep"));
+// 4.5 Health Sweep
+children.push(h2("4.5  Background Health Sweep"));
 children.push(body(
   "This loop runs concurrently with all HTTP requests. It is the engine behind automatic failover and recovery:"
 ));
@@ -618,7 +670,7 @@ children.push(spacer(6));
 
 children.push(h3("CITY_COORDS Lookup Table"));
 children.push(body(
-  "A dict mapping 60+ lowercase city name strings to (latitude, longitude) tuples. Covers North America, Europe, Asia-Pacific, and South America. Used in two places:"
+  "A dict mapping 120+ lowercase city name strings to (latitude, longitude) tuples. Covers North America (including NJ datacenter cities: Newark, Parsippany, Secaucus), Europe, Asia-Pacific (India: Bangalore, Hyderabad, Chennai, Pune, Kolkata), Africa, and South America. Used in two places:"
 ));
 children.push(bullet("_resolve_location() — converts a requester's city name to coordinates for geo-scoring"));
 children.push(bullet("register() in server.py — injects coordinates when an agent registers with only a city name"));
@@ -770,6 +822,88 @@ children.push(h3("AgentNSClientSync"));
 children.push(body(
   "Wraps each AgentNSClient method in asyncio.run(). Creates and destroys an event loop per call. Suitable for scripts, agent startup/shutdown, and testing. For high-throughput production paths, use the async AgentNSClient with await."
 ));
+children.push(spacer(8), new Paragraph({ children: [new PageBreak()] }));
+
+// ── 5.7 geocoder.py ──────────────────────────────────────────────────────
+children.push(h2("5.7  geocoder.py — Automatic City Geocoding"));
+children.push(body(
+  "Resolves any city name to (latitude, longitude) coordinates so agents can register with only a city name and still participate in geo-routing. No API key required. Falls back gracefully — if geocoding fails, the endpoint is still registered, geo-routing is simply disabled for it."
+));
+children.push(spacer(6));
+
+children.push(h3("Resolution Order"));
+children.push(codeBlock([
+  "1. Built-in CITY_COORDS table (instant, no network)",
+  "   → 120+ major cities pre-loaded in server_selection.py",
+  "",
+  "2. In-process memory cache _geocode_cache (instant, no network)",
+  "   → cities looked up via Nominatim are cached indefinitely",
+  "",
+  "3. OpenStreetMap Nominatim API (free, no API key, any city on Earth)",
+  "   → rate-limited: max 1 request/second (Nominatim fair-use policy)",
+  "   → 200–500 ms typical, 5 second timeout",
+  "   → User-Agent: agentns/1.0.0",
+  "",
+  "4. Returns None — geo-routing disabled for that endpoint (never raises)",
+  "   → a warning is logged suggesting the caller pass explicit lat/lon",
+]));
+children.push(spacer(6));
+
+children.push(h3("Module Constants and State"));
+children.push(spacer(2));
+children.push(makeTable(
+  ["Name", "Type", "Description"],
+  [
+    ["GEOCODING_ENABLED", "bool", "Read from AGENTNS_GEOCODING env var. Set to 'off' to disable Nominatim calls entirely (air-gapped environments). Built-in table and cache still work."],
+    ["NOMINATIM_URL", "str", "https://nominatim.openstreetmap.org/search — OpenStreetMap geocoding API"],
+    ["NOMINATIM_TIMEOUT", "float", "5.0 seconds — HTTP timeout for Nominatim requests"],
+    ["_geocode_cache", "Dict[str, Optional[Tuple]]", "In-process memory cache: city_key (lowercase) → (lat, lon) or None. Never expires — city coordinates don't change."],
+    ["_last_request_time", "float", "Monotonic timestamp of last Nominatim request, used to enforce 1 req/s rate limit"],
+  ],
+  [2400, 1800, 5160]
+));
+children.push(spacer(6));
+
+children.push(h3("Function Reference — geocoder.py"));
+children.push(spacer(4));
+children.push(makeTable(
+  ["Function", "Description"],
+  [
+    ["_wait_for_rate_limit()", "Async rate limiter. Computes elapsed since last Nominatim call. If < 1.0 s, sleeps the remainder. Enforces Nominatim's fair-use policy of max 1 request/second."],
+    ["_nominatim_lookup(city)", "Calls Nominatim API with q=city, format=json, limit=1. Parses lat/lon from first result. Returns None on HTTP error, empty results, timeout, or any exception. Never raises."],
+    ["resolve_city(city)", "Primary entry point. Runs the 4-step resolution chain. Called by server.py register() when an agent provides a city name. Caches results (including None) to avoid repeated Nominatim calls."],
+    ["geocode_cache_snapshot()", "Returns a copy of _geocode_cache. Used by GET /health to show which cities have been geocoded and their resolved coordinates."],
+  ],
+  [2600, 6760]
+));
+children.push(spacer(6));
+
+children.push(h3("Example: Agent registers with city name"));
+children.push(codeBlock([
+  'POST /register  { "label": "emailer", "endpoint": "http://host:9001",',
+  '                  "location": {"city": "Hyderabad"} }',
+  "",
+  "Step 1  'hyderabad' found in CITY_COORDS → (17.3850, 78.4867)  [instant]",
+  "        location updated: { city, latitude: 17.385, longitude: 78.4867 }",
+  "        geo_routing: active",
+  "",
+  'POST /register  { "label": "emailer", "endpoint": "http://host:9001",',
+  '                  "location": {"city": "Gdansk"} }',
+  "",
+  "Step 1  'gdansk' NOT in CITY_COORDS",
+  "Step 2  NOT in _geocode_cache",
+  "Step 3  GEOCODING_ENABLED=true → _nominatim_lookup('Gdansk')",
+  "        Nominatim returns lat=54.3521, lon=18.6464",
+  "        _geocode_cache['gdansk'] = (54.3521, 18.6464)",
+  "        geo_routing: active",
+  "",
+  'POST /register  { "label": "emailer", "endpoint": "http://host:9001",',
+  '                  "location": {"city": "Unknown City XYZ"} }',
+  "",
+  "Step 1-3  Not found in table, not in cache, Nominatim returns no results",
+  "          _geocode_cache['unknown city xyz'] = None",
+  "          geo_routing: disabled — endpoint still registered normally",
+]));
 children.push(spacer(8), new Paragraph({ children: [new PageBreak()] }));
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1023,6 +1157,7 @@ children.push(makeTable(
     ["MONGODB_URI", "(empty)", "str", "MongoDB connection string. Empty = in-memory mode. Supports Atlas SRV strings."],
     ["MONGODB_DB", "agentns", "str", "MongoDB database name"],
     ["AGENTNS_URL", "http://localhost:8200", "str", "Used by AgentNSClient() constructor when no URL argument provided"],
+    ["AGENTNS_GEOCODING", "on", "str", "Set to 'off' to disable Nominatim geocoding (air-gapped environments). Built-in CITY_COORDS table and explicit lat/lon still work."],
   ],
   [2600, 2000, 900, 3860]
 ));
@@ -1075,6 +1210,7 @@ children.push(makeTable(
   [
     ["200", "All success cases — including emergency_fallback (intentional: prevents orchestrators from hard-failing)"],
     ["400", "Missing required fields: label + endpoint for /register; agent_name or label for /resolve"],
+    ["403", "URN's TLD does not match AGENTNS_TLD (wrong nameserver), or URN's namespace does not match AGENTNS_NAMESPACE (wrong namespace). Plain labels never trigger 403."],
     ["404", "Label not registered when resolving or deregistering"],
   ],
   [1200, 8160]
@@ -1103,7 +1239,11 @@ children.push(makeTable(
     ["Background health loop iteration fails", "Logs warning, sleeps HEALTH_INTERVAL seconds, retries on next cycle."],
     ["AgentNSClient.resolve() network error", "Catches all exceptions, returns None. Caller implements fallback."],
     ["Unknown status string in _health_score()", "Defaults to 2 (unknown). Never raises."],
-    ["City name not in CITY_COORDS", "_resolve_location() returns None. Geo disabled for that request."],
+    ["City name not in CITY_COORDS (registration)", "geocoder.py tries Nominatim API. On success: coordinates injected, geo-routing active. On failure: warning logged, endpoint registered without coordinates, geo-routing disabled for that endpoint only."],
+    ["City name not in CITY_COORDS (resolve requester_context)", "_resolve_location() returns None (built-in table only). Geo distance = math.inf — ranking falls through to latency tiebreaker."],
+    ["Nominatim API unreachable / timeout", "Returns None. Endpoint still registered. Geo disabled. Warning logged with suggestion to pass explicit lat/lon."],
+    ["URN TLD mismatch in resolve", "HTTP 403 returned. No lookup performed. Detail message names the correct vs received TLD."],
+    ["URN namespace mismatch in resolve", "HTTP 403 returned. No lookup performed. Detail message names the correct namespace."],
   ],
   [3200, 6160]
 ));
