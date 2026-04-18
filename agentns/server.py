@@ -409,12 +409,27 @@ async def register(body: dict):
     flag         = body.get("flag") or ""
 
     # Normalise city → lat/lon if only city given
+    _location_resolved = False
     if isinstance(location, dict) and location.get("city") and not location.get("latitude"):
         from .server_selection import CITY_COORDS
         city_key = location["city"].lower().strip()
         if city_key in CITY_COORDS:
             lat, lon = CITY_COORDS[city_key]
             location = {**location, "latitude": lat, "longitude": lon}
+            _location_resolved = True
+        else:
+            # City not in the built-in lookup table.
+            # Geo-routing will be DISABLED for this endpoint (geo_distance = inf).
+            # The endpoint can still serve requests — it will be ranked by latency only.
+            # To enable geo-routing, re-register with explicit latitude/longitude:
+            #   {"city": "Hyderabad", "latitude": 17.3850, "longitude": 78.4867}
+            logger.warning(
+                f"register: city '{location['city']}' not in CITY_COORDS — "
+                f"geo-routing disabled for endpoint {endpoint!r}. "
+                f"Pass explicit latitude/longitude to enable geo-routing."
+            )
+    elif isinstance(location, dict) and location.get("latitude") and location.get("longitude"):
+        _location_resolved = True  # Explicit coords provided — geo-routing active
 
     # Health check URL — try custom first, then fall back to auto-discovery
     hc_url = (body.get("health_check_url") or "").strip()
@@ -448,13 +463,14 @@ async def register(body: dict):
     # Kick off immediate health check (non-blocking)
     asyncio.create_task(_check_single(endpoint, hc_url))
 
-    logger.info(f"{action}: label={label!r} endpoint={endpoint} region={region_label!r}")
+    logger.info(f"{action}: label={label!r} endpoint={endpoint} region={region_label!r} geo={'active' if _location_resolved else 'disabled'}")
     return {
         "status":          action,
         "label":           label,
         "endpoint":        endpoint,
         "agent_name":      entry["agent_name"],
         "total_endpoints": len(_registry[label]),
+        "geo_routing":     "active" if _location_resolved else "disabled — pass latitude/longitude to enable",
     }
 
 
