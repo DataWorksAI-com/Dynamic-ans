@@ -42,6 +42,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from .cache            import ResolutionCache
+from .geocoder         import resolve_city, geocode_cache_snapshot
 from .health_checker   import check_agent_health, probe_endpoint
 from .server_selection import rank_servers, select_protocol, calculate_ttl
 from .urn_parser       import parse_urn, build_urn, extract_label
@@ -408,28 +409,21 @@ async def register(body: dict):
     protocols    = body.get("protocols") or ["http"]
     flag         = body.get("flag") or ""
 
-    # Normalise city → lat/lon if only city given
+    # Normalise city → lat/lon
+    # Resolution order:
+    #   1. Explicit lat/lon already in payload → use directly
+    #   2. City name in built-in CITY_COORDS table → instant lookup
+    #   3. City name unknown → Nominatim geocoding API (free, any city on Earth)
+    #   4. Geocoding failed → geo-routing disabled, endpoint still registered
     _location_resolved = False
-    if isinstance(location, dict) and location.get("city") and not location.get("latitude"):
-        from .server_selection import CITY_COORDS
-        city_key = location["city"].lower().strip()
-        if city_key in CITY_COORDS:
-            lat, lon = CITY_COORDS[city_key]
-            location = {**location, "latitude": lat, "longitude": lon}
+    if isinstance(location, dict) and location.get("latitude") and location.get("longitude"):
+        _location_resolved = True  # Explicit coords — always works, no lookup needed
+    elif isinstance(location, dict) and location.get("city"):
+        coords = await resolve_city(location["city"])
+        if coords:
+            location = {**location, "latitude": coords[0], "longitude": coords[1]}
             _location_resolved = True
-        else:
-            # City not in the built-in lookup table.
-            # Geo-routing will be DISABLED for this endpoint (geo_distance = inf).
-            # The endpoint can still serve requests — it will be ranked by latency only.
-            # To enable geo-routing, re-register with explicit latitude/longitude:
-            #   {"city": "Hyderabad", "latitude": 17.3850, "longitude": 78.4867}
-            logger.warning(
-                f"register: city '{location['city']}' not in CITY_COORDS — "
-                f"geo-routing disabled for endpoint {endpoint!r}. "
-                f"Pass explicit latitude/longitude to enable geo-routing."
-            )
-    elif isinstance(location, dict) and location.get("latitude") and location.get("longitude"):
-        _location_resolved = True  # Explicit coords provided — geo-routing active
+        # If coords is None, warning already logged by resolve_city()
 
     # Health check URL — try custom first, then fall back to auto-discovery
     hc_url = (body.get("health_check_url") or "").strip()
@@ -535,6 +529,7 @@ async def health():
     all_statuses = [s["status"] for eps in agents_status.values() for s in eps]
     overall = "ok" if "unhealthy" not in all_statuses else "degraded"
 
+    geocache = geocode_cache_snapshot()
     return {
         "ok":                     overall == "ok",
         "status":                 overall,
@@ -547,6 +542,10 @@ async def health():
         "total_labels":           len(_registry),
         "total_endpoints":        sum(len(v) for v in _registry.values()),
         "uptime_seconds":         round(_time.time() - _start_time, 1),
+        "geocoded_cities":        {
+            city: {"lat": c[0], "lon": c[1]} if c else "failed"
+            for city, c in geocache.items()
+        },
         "agents":                 agents_status,
     }
 
