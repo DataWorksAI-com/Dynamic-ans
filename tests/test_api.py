@@ -41,6 +41,7 @@ async def test_register_and_list(client):
     assert data["status"] == "registered"
     assert data["label"] == "emailer"
     assert data["total_endpoints"] == 1
+    assert data["agent_name"] == "urn:agentns.local:agents.local:emailer"
 
     resp = await client.get("/agents")
     assert resp.status_code == 200
