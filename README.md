@@ -4,7 +4,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
-[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com)
+[![Docker](https://img.shields.io/badge/docker-manikandan3110%2Fagentns-blue.svg)](https://hub.docker.com/r/manikandan3110/agentns)
 
 ---
 
@@ -47,12 +47,50 @@ Three things happen automatically, with zero code changes to your agents:
 
 ## Quick start
 
-### Docker (recommended)
+### Local (Docker)
 
 ```bash
-# Start agentns
-docker run -p 8200:8200 ghcr.io/DataWorksAI-com/agentns:latest
+docker run -p 8200:8200 manikandan3110/agentns:latest
+```
 
+### On a remote server (production)
+
+```bash
+# One-command deploy to any Linux server
+# Installs Docker, builds image, sets up systemd, opens firewall
+./deploy.sh root@your-server-ip --env .env
+```
+
+agentns is now reachable at `http://your-server-ip:8200` from any machine.
+
+### Docker Compose
+
+```bash
+cp .env.example .env
+# Edit .env — set AGENTNS_TLD, AGENTNS_NAMESPACE, MONGODB_URI
+
+# Local dev
+docker compose up
+
+# Production (binds all interfaces, restart:always, logging)
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+# Production + bundled MongoDB
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile mongo up -d
+```
+
+### pip
+
+```bash
+pip install agentns
+agentns-server --namespace my-app
+```
+
+---
+
+### Try it
+
+```bash
 # Register an agent
 curl -X POST http://localhost:8200/register \
   -H "Content-Type: application/json" \
@@ -75,21 +113,6 @@ Response:
   "selected_by": "only_available",
   "resolution_time_ms": 1.4
 }
-```
-
-### pip
-
-```bash
-pip install agentns
-agentns-server --port 8200
-```
-
-### docker-compose (with MongoDB persistence)
-
-```bash
-cp .env.example .env
-# Edit .env: set MONGODB_URI if you want persistence across restarts
-docker compose up
 ```
 
 ---
@@ -264,6 +287,7 @@ All config via environment variables — zero hardcoded values.
 | `AGENTNS_HEALTH_INTERVAL` | `30` | Background health sweep interval (seconds) |
 | `MONGODB_URI` | *(empty)* | MongoDB connection string — omit for in-memory mode |
 | `MONGODB_DB` | `agentns` | MongoDB database name |
+| `AGENTNS_GEOCODING` | `on` | Set to `off` in air-gapped environments — built-in 120+ city table still works |
 | `AGENTNS_URL` | `http://localhost:8200` | Used by `AgentNSClient()` with no args |
 
 **In-memory mode** (no MongoDB): fast start, registrations lost on restart. Fine for local dev.
@@ -416,8 +440,28 @@ If the agent's health endpoint returns JSON with a `load_percent` or `load` fiel
 
 ## Deployment patterns
 
-### Sidecar (recommended)
-One agentns per orchestrator host. Agents in all regions register with it.
+### Remote server (production)
+Deploy to any Linux VPS in one command. agentns runs as a systemd service, survives reboots, restarts on crash.
+
+```bash
+# Fill in your config
+cp .env.example .env
+
+# Deploy — works on Ubuntu, Debian, CentOS, Rocky
+./deploy.sh root@your-server-ip --env .env
+```
+
+After deploy, point all your agents at the server IP:
+```python
+client = AgentNSClient("http://your-server-ip:8200")
+```
+
+Your cloud provider's firewall (AWS security group, GCP firewall rule, Linode firewall) must allow inbound TCP on port 8200. The deploy script handles OS-level firewalls (ufw / firewalld) automatically.
+
+---
+
+### Sidecar (one agentns per orchestrator host)
+Agents in all regions register with the local agentns. Best for low-latency local resolution.
 
 ```
 ┌─────────────────────────────────────────┐
@@ -434,17 +478,14 @@ One agentns per orchestrator host. Agents in all regions register with it.
 ```
 
 ### Centralised
-One shared agentns for the whole system. Use MongoDB to persist registrations.
+One shared agentns for the whole system. Use MongoDB to persist registrations across restarts.
 
-```yaml
-# docker-compose.yml
-services:
-  agentns:
-    image: ghcr.io/DataWorksAI-com/agentns:latest
-    ports: ["8200:8200"]
-    environment:
-      MONGODB_URI: "mongodb+srv://..."
-      AGENTNS_NAMESPACE: "mycompany.production"
+```bash
+docker run -d -p 8200:8200 \
+  -e AGENTNS_TLD="mycompany.com" \
+  -e AGENTNS_NAMESPACE="my-app" \
+  -e MONGODB_URI="mongodb+srv://user:pass@cluster/" \
+  manikandan3110/agentns:latest
 ```
 
 ### Embedded (Python only)
