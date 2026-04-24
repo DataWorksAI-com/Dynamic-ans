@@ -1,4 +1,4 @@
-# agentns — Agent Name Service
+# dynamic — Agent Name Service
 
 > **DNS for AI agents.** A single-binary sidecar that gives every agent in your multi-agent system a stable name, automatic health monitoring, geographic routing, and TTL-based caching — over a plain HTTP API any language can call.
 
